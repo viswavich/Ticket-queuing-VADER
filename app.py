@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from waitress import serve
 
 # Load environment variables
 load_dotenv()
@@ -365,4 +366,4 @@ def prioritize():
     return jsonify(final_output)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    serve(app, host="0.0.0.0", port=5000)
