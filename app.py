@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from waitress import serve
+import multiprocessing
 
 # Load environment variables
 load_dotenv()
@@ -18,9 +19,7 @@ GNB_TICKET_URL = os.getenv("TICKET_API_URL")
 if not GNB_TICKET_URL:
     raise ValueError("TICKET_API_URL is not set in the environment.")
 
-# Initialize VADER
-vader_analyzer = SentimentIntensityAnalyzer()
-
+# Priority mapping
 priority_order = {
     "Urgent": 0,
     "High": 1,
@@ -28,8 +27,37 @@ priority_order = {
     "Low": 3
 }
 
+# Thread pool for OpenAI
 executor = ThreadPoolExecutor(max_workers=8)
 
+# -----------------------
+# VADER multiprocessing setup
+# -----------------------
+analyzer = None
+
+def init_vader():
+    global analyzer
+    analyzer = SentimentIntensityAnalyzer()
+
+def analyze_sentiment(ticket):
+    global analyzer
+    content = f"{ticket.get('title', '')} {ticket.get('content', '')}"
+    vs = analyzer.polarity_scores(content)
+    compound_score = vs['compound']
+    scaled_score = int(round((compound_score + 1) * 5))  # [-1,1] → [0,10]
+    return scaled_score
+
+def get_vader_sentiment_score(client_id, tickets):
+    try:
+        with multiprocessing.Pool(processes=8, initializer=init_vader) as pool:
+            scores = pool.map(analyze_sentiment, tickets)
+        return int(round(sum(scores) / len(scores))) if scores else 0
+    except Exception as e:
+        return 0
+
+# -----------------------
+# Ticket Utilities
+# -----------------------
 def chunk_tickets(tickets, max_tokens=3000):
     chunks, chunk, token_count = [], [], 0
     for ticket in tickets:
@@ -73,10 +101,8 @@ Content: {content}
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
-
         output = response.choices[0].message.content.strip()
         summary, priority, urgency = "N/A", "Low", 6
-
         for line in output.splitlines():
             if line.lower().startswith("summary:"):
                 summary = line.split(":", 1)[1].strip()
@@ -89,9 +115,8 @@ Content: {content}
                     urgency = int(line.split(":", 1)[1].strip())
                 except:
                     urgency = 6
-
         return summary, priority, urgency
-    except Exception as e:
+    except:
         return "Could not summarize", "Low", 6
 
 def batch_generate_summary_and_priority(tickets):
@@ -132,22 +157,8 @@ def batch_generate_summary_and_priority(tickets):
             )
             for t in tickets
         ]
-    except Exception as e:
+    except:
         return [("Could not summarize", "Low", 6)] * len(tickets)
-
-def get_vader_sentiment_score(client_id, tickets):
-    try:
-        scores = []
-        analyzer = SentimentIntensityAnalyzer()
-        for t in tickets:
-            content = f"{t.get('title', '')} {t.get('content', '')}"
-            vs = analyzer.polarity_scores(content)
-            compound_score = vs['compound']
-            scaled_score = int(round((compound_score + 1) * 5))  # [-1,1] → [0,10]
-            scores.append(scaled_score)
-        return int(round(sum(scores) / len(scores))) if scores else 0
-    except Exception as e:
-        return 0
 
 def get_gpt_sentiment_score(client_id, tickets):
     try:
@@ -172,8 +183,7 @@ Respond with only a number between 0 and 10."""
             scores.append(score)
 
         return int(round(sum(scores) / len(scores)))
-
-    except Exception as e:
+    except:
         return 0
 
 def get_ticket_prefix(client_data):
@@ -194,6 +204,9 @@ def batch_process_tickets_parallel(tickets, batch_size=10):
         results.extend(r)
     return results
 
+# -----------------------
+# Main Endpoint
+# -----------------------
 @app.route('/prioritize', methods=['POST'])
 def prioritize():
     req = request.json
@@ -234,7 +247,7 @@ def prioritize():
 
             try:
                 data = json.loads(raw)
-            except Exception as e:
+            except:
                 continue
 
             client_name = data.get("cnb_title", "Unknown")
@@ -348,7 +361,7 @@ def prioritize():
                 "tickets": client_tickets
             })
 
-        except Exception as e:
+        except:
             continue
 
     if len(cnb_ids) > 1:
@@ -365,5 +378,9 @@ def prioritize():
 
     return jsonify(final_output)
 
+# -----------------------
+# Serve with Waitress
+# -----------------------
 if __name__ == "__main__":
+    multiprocessing.freeze_support()  # Important for Windows
     serve(app, host="0.0.0.0", port=5000)
