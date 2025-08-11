@@ -97,7 +97,7 @@ Content: {content}
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
@@ -129,7 +129,7 @@ def batch_generate_summary_and_priority(tickets):
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
         )
@@ -175,7 +175,7 @@ Tickets:
 Respond with only a number between 0 and 10."""
 
             response = openai.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3
             )
